@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import { getToken } from './lib/api'
 
 const routes = [
@@ -12,7 +12,8 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  // hash 模式：GitHub Pages 是纯静态托管，history 模式的深链接会 404
+  history: createWebHashHistory(),
   routes
 })
 

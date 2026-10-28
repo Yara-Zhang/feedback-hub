@@ -18,7 +18,8 @@ Deno.serve(async (req) => {
     if (path === '/authorize' && req.method === 'GET') {
       const redirectOrigin = url.searchParams.get('redirect_origin') || ''
       if (!/^https?:\/\//.test(redirectOrigin)) return err('redirect_origin 不合法')
-      const state = `${encodeURIComponent(redirectOrigin)}.${await signValue(redirectOrigin, JWT_SECRET)}`
+      // 分隔符用 |（encodeURIComponent 不会转义域名中的 . ，会把 | 转义，故 | 不会出现在编码后的 origin 里）
+      const state = `${encodeURIComponent(redirectOrigin)}|${await signValue(redirectOrigin, JWT_SECRET)}`
       const callbackUri = `${Deno.env.get('SUPABASE_URL')}/functions/v1/feishu-login/callback`
       return json({ url: authorizeUrl(callbackUri, state) })
     }
@@ -27,7 +28,7 @@ Deno.serve(async (req) => {
     if (path === '/callback' && req.method === 'GET') {
       const code = url.searchParams.get('code')
       const state = url.searchParams.get('state') || ''
-      const [rawOrigin, sig] = state.split('.')
+      const [rawOrigin, sig] = state.split('|')
       const redirectOrigin = decodeURIComponent(rawOrigin || '')
       if (!code || !redirectOrigin) return err('缺少 code 或 state')
 
@@ -64,8 +65,8 @@ Deno.serve(async (req) => {
       const token = await signJwt(payload, JWT_SECRET)
       const user = { id: userId, name: payload.name, avatar_url: fu.avatar_url, role }
 
-      // 重定向回前端登录页
-      const target = `${redirectOrigin.replace(/\/$/, '')}/login?token=${encodeURIComponent(token)}&user=${encodeURIComponent(JSON.stringify(user))}`
+      // 重定向回前端登录页（hash 路由，GitHub Pages 静态托管下不会 404）
+      const target = `${redirectOrigin.replace(/\/$/, '')}/#/login?token=${encodeURIComponent(token)}&user=${encodeURIComponent(JSON.stringify(user))}`
       return new Response(null, { status: 302, headers: { Location: target } })
     }
 
@@ -73,12 +74,12 @@ Deno.serve(async (req) => {
   } catch (e) {
     // 回调阶段错误重定向回登录页带错误信息
     if (path === '/callback') {
-      const [rawOrigin] = (url.searchParams.get('state') || '').split('.')
+      const [rawOrigin] = (url.searchParams.get('state') || '').split('|')
       const origin = decodeURIComponent(rawOrigin || '')
       if (/^https?:\/\//.test(origin)) {
         return new Response(null, {
           status: 302,
-          headers: { Location: `${origin.replace(/\/$/, '')}/login?err=${encodeURIComponent(e.message)}` },
+          headers: { Location: `${origin.replace(/\/$/, '')}/#/login?err=${encodeURIComponent(e.message)}` },
         })
       }
     }
