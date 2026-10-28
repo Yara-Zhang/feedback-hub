@@ -1,0 +1,24 @@
+project_id = "feedback-hub"
+
+# 所有函数在代码内部自行鉴权（自签 JWT / service key），
+# 网关层关闭 JWT 校验（前端持有的是本工具自签 token，非 Supabase token）
+[functions.feishu-login]
+verify_jwt = false
+
+[functions.crawl-tick]
+verify_jwt = false
+
+[functions.api-items]
+verify_jwt = false
+
+[functions.api-keywords]
+verify_jwt = false
+
+[functions.api-reply]
+verify_jwt = false
+
+[functions.api-export]
+verify_jwt = false
+
+[functions.weekly-report]
+verify_jwt = false

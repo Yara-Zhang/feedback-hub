@@ -1,0 +1,22 @@
+name: Daily Keep-Alive & Scrape Kick
+
+# 双重作用：
+# 1. 每日触发一次抓取（Supabase 定时任务之外的兜底）
+# 2. 保持 Supabase 免费版活跃（7 天无请求会被暂停）
+
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 每日 UTC 02:00（北京时间 10:00）
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger crawl tick
+        run: |
+          curl -sS -X POST \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.VITE_SUPABASE_URL }}/functions/v1/crawl-tick" \
+            --max-time 120 || echo "::warning::crawl-tick 调用失败，请检查 Supabase 项目状态"
