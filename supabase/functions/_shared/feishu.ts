@@ -35,12 +35,19 @@ export async function getAppAccessToken(): Promise<string> {
 export interface FeishuUser { open_id: string; name: string; avatar_url?: string }
 
 export async function getUserByCode(code: string): Promise<FeishuUser> {
-  const appToken = await getAppAccessToken()
-  // 换 user_access_token（v2 端点）
+  // 换 user_access_token（v2 端点：client 凭证放请求体，无需 app_access_token）
+  const { appId, appSecret } = env()
+  const redirectUri = `${Deno.env.get('SUPABASE_URL')}/functions/v1/feishu-login/callback`
   const tokenRes = await post<{ access_token?: string; error?: string; error_description?: string }>(
     '/open-apis/authen/v2/oauth/token',
-    { grant_type: 'authorization_code', code },
-    appToken,
+    {
+      grant_type: 'authorization_code',
+      client_id: appId,
+      client_secret: appSecret,
+      code,
+      // v2 端点要求 redirect_uri，且必须与 authorize 时一字不差
+      redirect_uri: redirectUri,
+    },
   )
   if (!tokenRes.access_token) {
     throw new Error(`飞书授权码换取失败: ${tokenRes.error_description || tokenRes.error || '未知错误'}`)

@@ -169,44 +169,45 @@ async function deployFunctions() {
   console.log('当前函数列表:', (Array.isArray(list) ? list : []).map((f) => f.name).join(', '))
 }
 
-// ---------- Cron（pg_cron + pg_net + vault） ----------
+// ---------- Cron（pg_cron + pg_net，密钥存 app_config 表；vault 扩展本环境不可用） ----------
 async function setupCron() {
   if (!env.CRON_SECRET) throw new Error('缺少 CRON_SECRET')
   const fnBase = `https://${REF}.supabase.co/functions/v1`
 
-  // 1. 密钥入 vault（幂等：先删再建）
+  // pg_cron 调度使用 UTC：周一 01:30 UTC = 北京时间周一 09:30
   const sqls = [
-    `select vault.del_secret('feedback_cron_secret');`,
-    `select vault.create_secret('${env.CRON_SECRET}', 'feedback_cron_secret');`,
+    // 1. 密钥写入 app_config（幂等 upsert）
+    `insert into public.app_config (key, value, updated_at)
+     values ('cron_secret', to_jsonb('${env.CRON_SECRET}'::text), now())
+     on conflict (key) do update set value = excluded.value, updated_at = now();`,
+    // 2. 抓取：每 5 分钟处理 2 个分片（timeout 加长，一轮抓取可能超 5s 默认值）
     `select cron.schedule('feedback-crawl-tick', '*/5 * * * *', $$
 select net.http_post(
   url := '${fnBase}/crawl-tick',
-  headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'feedback_cron_secret')),
-  body := '{}'::jsonb
+  headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select value #>> '{}' from public.app_config where key = 'cron_secret')),
+  body := '{}'::jsonb,
+  timeout_milliseconds := 180000
 );
 $$);`,
+    // 3. 周报：每周一北京时间 09:30（01:30 UTC）
     `select cron.schedule('feedback-weekly-report', '30 1 * * 1', $$
 select net.http_post(
   url := '${fnBase}/weekly-report',
-  headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'feedback_cron_secret')),
-  body := '{}'::jsonb
+  headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select value #>> '{}' from public.app_config where key = 'cron_secret')),
+  body := '{}'::jsonb,
+  timeout_milliseconds := 60000
 );
 $$);`,
   ]
   for (const sql of sqls) {
-    try {
-      await api('/database/query', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: sql }),
-      })
-    } catch (e) {
-      // vault.del_secret 不存在时会报错，忽略
-      if (!/does not exist|not found|no secret/i.test(String(e.message))) throw e
-    }
+    await api('/database/query', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: sql }),
+    })
   }
   const jobs = await api('/database/query', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: `select jobname, schedule, active from cron.jobs where jobname like 'feedback-%'` }),
+    body: JSON.stringify({ query: `select jobname, schedule, active from cron.job where jobname like 'feedback-%'` }),
   })
   console.log('✅ 定时任务：', JSON.stringify(jobs))
 }

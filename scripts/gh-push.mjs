@@ -8,7 +8,16 @@ import { join } from 'node:path'
 const ROOT = process.cwd()
 const repo = process.argv[2]
 const branch = process.argv[3] || 'main'
-const TOKEN = process.env.GH_TOKEN
+// GH_TOKEN 优先环境变量，其次读 scripts/.deploy.env（已 gitignore）
+let TOKEN = process.env.GH_TOKEN
+if (!TOKEN) {
+  try {
+    for (const line of readFileSync(join(ROOT, 'scripts/.deploy.env'), 'utf8').split('\n')) {
+      const m = line.match(/^GH_TOKEN=(.*)$/)
+      if (m) { TOKEN = m[1].trim(); break }
+    }
+  } catch { /* 文件不存在则忽略 */ }
+}
 if (!repo || !TOKEN) { console.error('用法: GH_TOKEN=xxx node scripts/gh-push.mjs <owner>/<repo> [branch]'); process.exit(1) }
 
 const api = async (path, init = {}) => {

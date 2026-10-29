@@ -8,22 +8,44 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 let lastUsageInc = 0
 
 export async function tikhubGet(path: string, params: Record<string, string | number | undefined>): Promise<unknown> {
+  return tikhubRequest(path, 'GET', params)
+}
+
+// 部分端点（如抖音搜索）要求 POST + JSON body
+export async function tikhubPost(path: string, body: Record<string, string | number | undefined>): Promise<unknown> {
+  return tikhubRequest(path, 'POST', undefined, body)
+}
+
+async function tikhubRequest(
+  path: string,
+  method: 'GET' | 'POST',
+  params?: Record<string, string | number | undefined>,
+  body?: Record<string, string | number | undefined>,
+): Promise<unknown> {
   const key = Deno.env.get('TIKHUB_API_KEY') || ''
   if (!key) throw new Error('未配置 TIKHUB_API_KEY')
 
-  const qs = Object.entries(params)
-    .filter(([, v]) => v !== undefined && v !== null && v !== '')
-    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')
-
+  const qs = params
+    ? Object.entries(params)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')
+    : ''
   const url = `${BASE}${path}${qs ? `?${qs}` : ''}`
   let lastErr: unknown
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${key}`, 'User-Agent': UA },
+        method,
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'User-Agent': UA,
+          ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
+        },
+        ...(method === 'POST' && body ? { body: JSON.stringify(body) } : {}),
         signal: AbortSignal.timeout(25_000),
       })
       if (res.status === 429) throw new Error('TikHub 限流(429)')
+      if (res.status === 401) throw new Error('TikHub 鉴权失败(401)，请检查 TIKHUB_API_KEY')
       const json = await res.json().catch(() => { throw new Error(`TikHub 响应非 JSON(${res.status})`) })
       // 用量计数（限频 1 次/秒，失败忽略）
       if (Date.now() - lastUsageInc > 1000) {
