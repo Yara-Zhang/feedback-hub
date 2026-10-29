@@ -341,3 +341,13 @@ insert into public.keywords (keyword, part_type, group_tag) values
   ('翻译接单', 'exclude', 'none'),
   ('翻译服务', 'exclude', 'none')
 on conflict (keyword, part_type) do nothing;
+
+-- ========== 2026-10-29 补丁：函数加 security definer ==========
+-- 原因：RLS deny-all 下，service_role 经 PostgREST SET ROLE 调用函数时内部查询看不到行
+-- （enrich_llm 任务 source_id 为 NULL 的根因）。加 security definer 后以所有者身份运行，稳定绕过 RLS。
+alter function public.pop_jobs(int) security definer set search_path = public;
+alter function public.enqueue_round() security definer set search_path = public;
+alter function public.enqueue_llm_jobs() security definer set search_path = public;
+alter function public.inc_usage(int, int) security definer set search_path = public;
+alter function public.inc_keyword_hits(text, int) security definer set search_path = public;
+alter function public.dashboard_stats() security definer set search_path = public;
