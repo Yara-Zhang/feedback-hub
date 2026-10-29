@@ -351,3 +351,40 @@ alter function public.enqueue_llm_jobs() security definer set search_path = publ
 alter function public.inc_usage(int, int) security definer set search_path = public;
 alter function public.inc_keyword_hits(text, int) security definer set search_path = public;
 alter function public.dashboard_stats() security definer set search_path = public;
+
+-- ========== 2026-10-29 补丁：关键词别名（圈内黑话） ==========
+-- AO3 在简中圈的多种叫法：凹3/凹三/红白；以及同人、汉化场景补充
+insert into public.keywords (keyword, part_type, group_tag)
+select v.kw, 'part_b', v.grp from (values
+  ('凹3翻译', 'novel'), ('凹三翻译', 'novel'), ('红白翻译', 'novel'),
+  ('凹3中文', 'novel'), ('ao3双语', 'novel'), ('同人文翻译', 'novel'),
+  ('漫画汉化', 'comic')
+) as v(kw, grp)
+where not exists (select 1 from public.keywords k where k.keyword = v.kw);
+
+-- ========== 2026-10-29 补丁：pop_jobs 打标任务优先出队 ==========
+-- 原因：enrich_llm 任务按 id 排序会排在几百个 bulk 搜索任务后面（饿 16 小时+），新抓数据迟迟不打标
+create or replace function public.pop_jobs(p_limit int default 2)
+returns setof public.crawl_jobs
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.crawl_jobs
+  set status = 'pending', locked_at = null, updated_at = now()
+  where status = 'running' and locked_at < now() - interval '5 minutes';
+
+  return query
+    update public.crawl_jobs j
+    set status = 'running', locked_at = now(), updated_at = now()
+    where j.id in (
+      select id from public.crawl_jobs
+      where status = 'pending'
+      order by (case when job_type = 'enrich_llm' then 0 else 1 end), id
+      limit greatest(1, least(p_limit, 10))
+      for update skip locked
+    )
+    returning j.*;
+end;
+$$;
