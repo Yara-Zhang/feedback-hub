@@ -55,8 +55,40 @@ Deno.serve(async (req) => {
         delete it.claim_user
         return { ...it, claim_name: claim?.name || null }
       })
+
+      // ---------- 空结果诊断（如实告知"是排队中还是真没有"） ----------
+      let emptyContext: Record<string, unknown> | null = null
+      if (count === 0) {
+        // a) 基础条件（平台/来源/类型/关键词）相同、但尚未 AI 打标的条数——场景/优先级筛选要等打标后才生效
+        const baseParams: Record<string, string | number> = {
+          select: 'id', ai_status: 'eq.pending', limit: 1,
+        }
+        if (filters.platform) baseParams.platform = filters.platform
+        if (filters.part_type) baseParams.part_type = filters.part_type
+        if (filters.content_type) baseParams.content_type = filters.content_type
+        if (q) baseParams.or = `(content_text.ilike.*${q.replace(/[(),]/g, ' ')}*,author_name.ilike.*${q.replace(/[(),]/g, ' ')}*)`
+        const { count: pendingTagging } = await restSelect('feedback_items', baseParams, { count: true })
+
+        // b) 抓取任务队列（若选了平台，看该平台；否则看总量）与最近入库时间
+        const jobParams: Record<string, string | number> = { select: 'id', status: 'eq.pending', limit: 1 }
+        if (filters.platform) jobParams.platform = `eq.${p.get('platform')}`
+        const { count: queuedJobs } = await restSelect('crawl_jobs', jobParams, { count: true })
+
+        const lastParams: Record<string, string | number> = {
+          select: 'created_at', order: 'created_at.desc', limit: 1,
+        }
+        if (filters.platform) lastParams.platform = p.get('platform') || ''
+        const { data: lastRow } = await restSelect<{ created_at: string }>('feedback_items', lastParams, { single: true })
+
+        emptyContext = {
+          pending_tagging: pendingTagging || 0,
+          queued_jobs: queuedJobs || 0,
+          last_item_at: lastRow?.[0]?.created_at || null,
+        }
+      }
+
       const stats = await restRpc<Record<string, number>>('dashboard_stats')
-      return json({ items, total: count, stats })
+      return json({ items, total: count, stats, ...(emptyContext ? { empty_context: emptyContext } : {}) })
     }
 
     // ---------- 详情 ----------

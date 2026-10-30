@@ -43,8 +43,35 @@
 
     <!-- 列表 -->
     <div v-if="loading" class="text-center py-16 text-slate-400">加载中…</div>
-    <div v-else-if="!items.length" class="card p-12 text-center text-slate-400">
-      暂无符合条件的反馈，可在「抓取状态」页手动触发一轮抓取
+    <div v-else-if="!items.length" class="card p-10 text-center">
+      <!-- 情况一：有匹配数据但还在 AI 打标排队 -->
+      <template v-if="emptyCtx && emptyCtx.pending_tagging > 0">
+        <div class="text-3xl mb-3">⏳</div>
+        <div class="text-slate-600 font-medium mb-1">
+          有 {{ emptyCtx.pending_tagging }} 条匹配的数据正在排队等待 AI 打标
+        </div>
+        <div class="text-sm text-slate-400">
+          场景 / 优先级筛选要在打标完成后才生效，稍等几分钟刷新即可看到
+        </div>
+      </template>
+      <!-- 情况二：该平台还有抓取任务在队列 -->
+      <template v-else-if="emptyCtx && emptyCtx.queued_jobs > 0">
+        <div class="text-3xl mb-3">📬</div>
+        <div class="text-slate-600 font-medium mb-1">
+          还有 {{ emptyCtx.queued_jobs }} 个抓取任务在队列中，数据会陆续进来
+        </div>
+        <div class="text-sm text-slate-400">
+          系统每 5 分钟自动抓一批{{ emptyCtx.last_item_at ? `，最近入库：${formatTime(emptyCtx.last_item_at)}` : '' }}，稍后刷新看看
+        </div>
+      </template>
+      <!-- 情况三：真的没搜到 -->
+      <template v-else>
+        <div class="text-3xl mb-3">🔍</div>
+        <div class="text-slate-600 font-medium mb-1">当前筛选条件下确实没有搜到反馈</div>
+        <div class="text-sm text-slate-400">
+          可以放宽筛选条件试试；如果这个方向应该有讨论，可到「关键词管理」添加新的搜索关键词
+        </div>
+      </template>
     </div>
     <div v-else class="space-y-3">
       <FeedbackCard v-for="it in items" :key="it.id" :item="it" @open="goDetail" />
@@ -73,6 +100,13 @@ const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
 const stats = ref({})
+const emptyCtx = ref(null)
+
+function formatTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return `${d.getMonth() + 1}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 
 const filters = reactive({
   platform: '', part_type: '', ai_scene: '', content_type: '', ai_priority: '', status: '', q: ''
@@ -93,6 +127,7 @@ async function load() {
     items.value = res.items || []
     total.value = res.total || 0
     stats.value = res.stats || {}
+    emptyCtx.value = res.empty_context || null
   } catch (e) {
     items.value = []
   } finally { loading.value = false }
