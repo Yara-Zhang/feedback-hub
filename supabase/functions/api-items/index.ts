@@ -71,13 +71,13 @@ Deno.serve(async (req) => {
 
         // b) 抓取任务队列（若选了平台，看该平台；否则看总量）与最近入库时间
         const jobParams: Record<string, string | number> = { select: 'id', status: 'eq.pending', limit: 1 }
-        if (filters.platform) jobParams.platform = `eq.${p.get('platform')}`
+        if (filters.platform) jobParams.platform = filters.platform
         const { count: queuedJobs } = await restSelect('crawl_jobs', jobParams, { count: true })
 
         const lastParams: Record<string, string | number> = {
           select: 'created_at', order: 'created_at.desc', limit: 1,
         }
-        if (filters.platform) lastParams.platform = p.get('platform') || ''
+        if (filters.platform) lastParams.platform = filters.platform
         const { data: lastRow } = await restSelect<{ created_at: string }>('feedback_items', lastParams, { single: true })
 
         emptyContext = {
