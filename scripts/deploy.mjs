@@ -118,7 +118,7 @@ async function setSecrets() {
 }
 
 // ---------- Functions：esbuild 打包单文件 + multipart 部署 ----------
-const FUNCTIONS = ['feishu-login', 'crawl-tick', 'api-items', 'api-keywords', 'api-reply', 'api-export', 'weekly-report']
+const FUNCTIONS = ['feishu-login', 'auth-password', 'crawl-tick', 'api-items', 'api-keywords', 'api-reply', 'api-export', 'weekly-report']
 
 async function deployFunctions() {
   const esbuild = (await import('/Users/mickey/.workbuddy/binaries/node/workspace/node_modules/esbuild/lib/main.js')).default

@@ -10,7 +10,7 @@
         <div v-else class="w-9 h-9 rounded-full bg-primary-100 flex items-center justify-center text-primary-700">{{ (u.name || '?')[0] }}</div>
         <div class="flex-1">
           <div class="text-sm font-medium text-slate-700">{{ u.name }}</div>
-          <div class="text-xs text-slate-400">加入于 {{ (u.created_at || '').slice(0, 10) }} · 已回复 {{ u.replied_count ?? 0 }} 条</div>
+          <div class="text-xs text-slate-400">{{ u.email || '飞书扫码用户' }} · 加入于 {{ (u.created_at || '').slice(0, 10) }} · 已回复 {{ u.replied_count ?? 0 }} 条</div>
         </div>
         <span class="tag" :class="u.role === 'admin' ? 'bg-primary-100 text-primary-700' : 'bg-slate-100 text-slate-500'">
           {{ u.role === 'admin' ? '管理员' : '成员' }}

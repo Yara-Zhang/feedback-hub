@@ -40,6 +40,14 @@ export async function getFeishuAuthUrl(redirectOrigin) {
   return call('feishu-login', '/authorize', { params: { redirect_origin: redirectOrigin } })
 }
 
+// 邮箱密码注册/登录（第二通道）
+export async function passwordRegister({ email, password, name, invite_code }) {
+  return call('auth-password', '/register', { method: 'POST', body: { email, password, name, invite_code } })
+}
+export async function passwordLogin(email, password) {
+  return call('auth-password', '/login', { method: 'POST', body: { email, password } })
+}
+
 // ===== 反馈条目 =====
 export const api = {
   items: {

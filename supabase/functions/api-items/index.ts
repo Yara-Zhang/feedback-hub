@@ -249,7 +249,7 @@ Deno.serve(async (req) => {
     // ---------- 成员列表 ----------
     if (path === '/users/list' && req.method === 'GET') {
       if (session.role !== 'admin') return err('需要管理员权限', 403)
-      const { data: users } = await restSelect<Record<string, unknown>>('users', { select: 'id,name,avatar_url,role,created_at', order: 'created_at.asc' })
+      const { data: users } = await restSelect<Record<string, unknown>>('users', { select: 'id,name,email,avatar_url,role,created_at', order: 'created_at.asc' })
       const { data: processed } = await restSelect<{ claim_user_id: number }>('feedback_items', {
         select: 'claim_user_id', status: 'eq.replied',
       })
