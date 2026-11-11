@@ -381,7 +381,7 @@ begin
     where j.id in (
       select id from public.crawl_jobs
       where status = 'pending'
-      order by (case when job_type = 'enrich_llm' then 0 else 1 end), id
+      order by (case when job_type = 'enrich_llm' then 0 when job_type = 'recheck' then 1 else 2 end), id
       limit greatest(1, least(p_limit, 10))
       for update skip locked
     )

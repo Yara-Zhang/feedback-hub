@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: items } = await restSelect<Record<string, unknown>>('feedback_items', {
-      select: '*,claim_user:users(name)', order: 'created_at.desc', limit: 5000, ...filters,
+      select: '*,claim_user:users!feedback_items_claim_user_id_fkey(name)', order: 'created_at.desc', limit: 5000, ...filters,
     })
 
     // ---------- 宣发素材 brief（scope=material）----------

@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
       if (q) filters['or'] = `(content_text.ilike.*${q.replace(/[(),]/g, ' ')}*,author_name.ilike.*${q.replace(/[(),]/g, ' ')}*)`
 
       const params: Record<string, string | number> = {
-        select: '*,claim_user:users(name)',
+        select: '*,claim_user:users!feedback_items_claim_user_id_fkey(name)',
         order: 'created_at.desc',
         limit: pageSize,
         offset: (page - 1) * pageSize,
@@ -107,7 +107,7 @@ Deno.serve(async (req) => {
     if (idMatch && req.method === 'GET') {
       const id = idMatch[1]
       const { data } = await restSelect<Record<string, unknown>>('feedback_items', {
-        select: '*,claim_user:users(name)', id: `eq.${id}`,
+        select: '*,claim_user:users!feedback_items_claim_user_id_fkey(name)', id: `eq.${id}`,
       }, { single: true })
       if (!data?.length) return err('反馈不存在', 404)
       const item = { ...data[0], claim_name: ((data[0].claim_user as { name?: string } | null)?.name) || null }
@@ -138,7 +138,8 @@ Deno.serve(async (req) => {
       const { data: rows } = await restSelect<{ claim_user_id: number | null }>('feedback_items', {
         select: 'claim_user_id', id: `eq.${id}`,
       }, { single: true })
-      const owner = rows?.[0]?.claim_user_id
+      if (!rows?.length) return err('反馈不存在', 404)
+      const owner = rows[0].claim_user_id
       if (owner !== session.sub && session.role !== 'admin') return err('仅认领人或管理员可修改状态', 403)
 
       let patch: Record<string, unknown> = { status: b.status }
@@ -200,7 +201,7 @@ Deno.serve(async (req) => {
     if (path === '/hot' && req.method === 'GET') {
       const market = url.searchParams.get('market') || ''
       const params: Record<string, string | number> = {
-        select: '*,claim_user:users(name)',
+        select: '*,claim_user:users!feedback_items_claim_user_id_fkey(name)',
         part_type: 'eq.part_a',
         ai_status: 'neq.skipped',
         created_at: `gte.${new Date(Date.now() - 7 * 86400_000).toISOString()}`,

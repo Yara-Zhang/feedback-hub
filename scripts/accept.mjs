@@ -72,17 +72,23 @@ function report(name, pass, detail) {
 // ---------- Phase 1: 准备测试数据 ----------
 async function prep() {
   console.log('\n===== Phase 1 准备测试数据 =====')
+  // 7451: 求助帖（带完整打标字段，复刻上轮真实 enrich 结果）
   // 7454: jp 市场条目（generate 拦截测试）
   // 7455: P0 负面 + 高互动（告警链路测试），ai_status=pending 走真实 enrich
   await q(`insert into feedback_items
-    (id, part_type, platform, content_type, source_id, source_url, author_name, content_text, metrics_json, market, ai_status, created_at)
-   values
-    (7454, 'part_a', 'x', 'post', 't4', 'https://x.com/t4', 'jp_user', '漫画 翻訳 アプリ おすすめありますか', '{"liked_count":12,"comment_count":3}', 'jp', 'done', now()),
+    (id, part_type, platform, content_type, source_id, source_url, author_name, content_text, metrics_json, market, ai_status,
+     ai_priority, ai_sentiment, ai_scene, ai_quote, ai_confidence, ai_verified, ai_topic, dedup_hash, created_at)
+   overriding system value values
+    (7451, 'part_a', 'xhs', 'note', 't1', 'https://www.xiaohongshu.com/explore/t1', '求助网友',
+     '看不懂日文漫画真的太痛苦了，追更三年一直等汉化组，现在等不起了，有没有好用的漫画翻译APP推荐啊，跪求',
+     '{"liked_count":35,"comment_count":6}', 'cn', 'done', 'p0', 'negative', 'comic',
+     '看不懂日文漫画真的太痛苦了', 0.95, true, '漫画没汉化', 'accept_t1', now()),
+    (7454, 'part_a', 'x', 'post', 't4', 'https://x.com/t4', 'jp_user', '漫画 翻訳 アプリ おすすめありますか', '{"liked_count":12,"comment_count":3}', 'jp', 'done', null, null, null, null, null, null, null, 'accept_t4', now()),
     (7455, 'part_a', 'xhs', 'note', 't5', 'https://www.xiaohongshu.com/explore/t5', 'angry_user',
      '沉浸式翻译最近用不了了！漫画翻译出来全是乱码，翻译质量越来越差，付费会员有问题找客服也没人理，气死了，大家千万别买',
-     '{"liked_count":45,"comment_count":8}', 'cn', 'pending', now())
+     '{"liked_count":45,"comment_count":8}', 'cn', 'pending', null, null, null, null, null, null, null, 'accept_t5', now())
    on conflict (id) do nothing;`)
-  console.log('已插入 7454（jp 拦截测试）/ 7455（P0 告警测试， pending 待 enrich）')
+  console.log('已插入 7451（带打标字段的求助帖）/ 7454（jp 拦截测试）/ 7455（P0 告警测试， pending 待 enrich）')
 }
 
 // ---------- Phase 2: API 端点验收 ----------
@@ -114,7 +120,8 @@ async function apiPhase() {
   const rc = await callFn('POST', '/api-items/recheck')
   report('POST /recheck 入队', rc.status === 200 && JSON.parse(rc.body).queued >= 1, rc.body.slice(0, 80))
 
-  // 2.5 触发 crawl-tick 消化 enrich(7455) + recheck(7451) —— 循环直到目标达成
+  // 2.5 触发 crawl-tick 消化 enrich(7455) + recheck(7451)
+  //    pop_jobs 已修优先级（enrich > recheck > search），少量 tick 即可出队
   console.log('  触发 crawl-tick（消化 enrich 告警测试 + recheck）…')
   let tickNote = ''
   for (let i = 0; i < 8; i++) {
@@ -128,6 +135,9 @@ async function apiPhase() {
     if (done7455 && rkDone) break
     if (!done7455 || !rkDone) await new Promise((r) => setTimeout(r, 3000))
   }
+
+  // 恢复暂存任务（deferred → pending）—— 若有遗留
+  await q(`update crawl_jobs set status = 'pending' where status = 'deferred'`)
 
   // 2.6 导出：素材 brief
   const expMat = await callFn('GET', `/api-export/export?scope=material&token=${JWT}`)
@@ -149,8 +159,8 @@ async function apiPhase() {
   // 2.9 关键词质量统计
   const kw = await callFn('GET', '/api-keywords/list')
   const kwJson = JSON.parse(kw.body || '{}')
-  const kwStats = kwJson.keywords?.[0]?.stats
-  report('GET /api-keywords/list 附质量统计', kw.status === 200 && kwStats && ('hits' in kwStats), `status=${kw.status} 首词统计=${JSON.stringify(kwStats || {})}`)
+  const anyStats = (kwJson.keywords || []).some((k) => k.stats && k.stats.hits > 0)
+  report('GET /api-keywords/list 附质量统计', kw.status === 200 && anyStats, `status=${kw.status} 有关键词带统计=${anyStats} 示例=${JSON.stringify((kwJson.keywords || []).find((k) => k.stats && k.stats.hits > 0)?.stats || {})}`)
 
   // 2.10 真发日报到飞书（period=daily）
   const daily = await callFn('POST', '/weekly-report', { period: 'daily' })
@@ -161,16 +171,19 @@ async function apiPhase() {
 async function verifyPhase() {
   console.log('\n===== Phase 3 库内状态核验 =====')
   const it = await q(`select id, status, claim_user_id, reply_url, replied_at, is_material, material_by,
-    ai_quote, ai_verified, ai_confidence, ai_topic, market from feedback_items where id in (7451, 7455) order by id`)
+    ai_quote, ai_verified, ai_confidence, ai_topic, market,
+    ai_status, ai_priority, ai_sentiment from feedback_items where id in (7451, 7455) order by id`)
   const a = it[0] || {}, b = it[1] || {}
   report('7451 状态闭环', a.status === 'replied' && a.claim_user_id === 1 && !!a.reply_url && a.is_material === true && a.material_by === 1,
     `status=${a.status} claim=${a.claim_user_id} reply_url=${(a.reply_url || '').slice(0, 40)} material=${a.is_material}`)
   report('7455 P0 负面打标+告警', b.ai_status === 'done' && b.ai_priority === 'p0' && b.ai_sentiment === 'negative',
     `ai_status=${b.ai_status} priority=${b.ai_priority} sentiment=${b.ai_sentiment} verified=${b.ai_verified} quote=${(b.ai_quote || '').slice(0, 30)}`)
   const rk = await q(`select status, result_note, cursor_info->>'item_id' as item_id from crawl_jobs where job_type='recheck' and source_id='t1' order by id desc limit 1`)
-  report('recheck 任务已处理', Array.isArray(rk) && rk[0] && rk[0].status === 'done', `status=${rk[0]?.status} note=${(rk[0]?.result_note || '').slice(0, 60)}（t1 为假 source_id，预期"详情不可用"）`)
-  const ks = await q(`select * from keyword_stats() order by hits desc limit 3`)
-  report('keyword_stats() RPC', Array.isArray(ks) && ks.length >= 1, `top=${JSON.stringify(ks[0] || {})}`)
+  report('recheck 任务已处理', Array.isArray(rk) && rk[0] && ['done', 'failed'].includes(rk[0].status), `status=${rk[0]?.status} note=${(rk[0]?.result_note || '').slice(0, 60)}（t1 为假 source_id，预期"详情不可用"）`)
+  const ksRaw = await q(`select keyword_stats()::text as s`)
+  const ks = Array.isArray(ksRaw) ? JSON.parse(ksRaw[0].s) : []
+  const ksTop = (ks || []).slice().sort((a, b) => b.hits - a.hits).slice(0, 3)
+  report('keyword_stats() RPC', Array.isArray(ks) && ks.length >= 1, `top3=${JSON.stringify(ksTop)}`)
   // 回复后互动字段
   const after = await q(`select recheck_at, metrics_after_json from feedback_items where id = 7451`)
   report('7451 recheck_at 已写', !!after[0]?.recheck_at, `recheck_at=${after[0]?.recheck_at} after_json=${JSON.stringify(after[0]?.metrics_after_json)}`)
