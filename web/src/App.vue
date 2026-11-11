@@ -44,6 +44,8 @@ const user = getCachedUser()
 const navs = computed(() => {
   const list = [
     { to: '/', label: '反馈工作台' },
+    { to: '/hot', label: '热点' },
+    { to: '/material', label: '素材库' },
     { to: '/mine', label: '我的认领' }
   ]
   if (user?.role === 'admin') {

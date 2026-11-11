@@ -10,7 +10,9 @@ export const PLATFORMS = {
   wb: { label: '微博', color: 'bg-orange-100 text-orange-600', icon: '🟠' },
   bili: { label: 'B站', color: 'bg-blue-100 text-blue-600', icon: '📺' },
   dy: { label: '抖音', color: 'bg-neutral-800 text-white', icon: '🎵' },
-  x: { label: 'X', color: 'bg-slate-800 text-white', icon: '𝕏' }
+  x: { label: 'X', color: 'bg-slate-800 text-white', icon: '𝕏' },
+  reddit: { label: 'Reddit', color: 'bg-orange-100 text-orange-700', icon: '👽' },
+  zhihu: { label: '知乎', color: 'bg-blue-100 text-blue-700', icon: '🔗' }
 }
 
 export const CONTENT_TYPES = {
@@ -18,6 +20,13 @@ export const CONTENT_TYPES = {
 }
 
 export const PART_TYPES = { part_a: '沉浸式翻译相关', part_b: '全量场景' }
+
+export const MARKETS = {
+  cn: { label: '中文', cls: 'bg-slate-100 text-slate-600' },
+  en: { label: '英文', cls: 'bg-blue-100 text-blue-700' },
+  jp: { label: '日文', cls: 'bg-red-100 text-red-700' },
+  kr: { label: '韩文', cls: 'bg-violet-100 text-violet-700' }
+}
 
 export const SCENES = { comic: '漫画', novel: '小说/AO3', video: '视频', other: '其他' }
 
@@ -28,7 +37,7 @@ export const PRIORITIES = {
 }
 
 export const STATUSES = {
-  new: '待处理', claimed: '已认领', processed: '已处理', ignored: '已忽略'
+  new: '待处理', claimed: '已认领', replied: '已回复', skipped: '已跳过'
 }
 
 export const SENTIMENTS = { positive: '正面', neutral: '中性', negative: '负面' }

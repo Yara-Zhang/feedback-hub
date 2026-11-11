@@ -15,6 +15,10 @@
           <option value="">全部平台</option>
           <option v-for="(p, k) in PLATFORMS" :key="k" :value="k">{{ p.label }}</option>
         </select>
+        <select v-model="filters.market" class="input w-28">
+          <option value="">全部市场</option>
+          <option v-for="(m, k) in MARKETS" :key="k" :value="k">{{ m.label }}市场</option>
+        </select>
         <select v-model="filters.part_type" class="input w-40">
           <option value="">全部来源</option>
           <option value="part_a">沉浸式翻译相关</option>
@@ -37,6 +41,10 @@
           <option v-for="(l, k) in STATUSES" :key="k" :value="k">{{ l }}</option>
         </select>
         <input v-model="filters.q" class="input flex-1 min-w-40" placeholder="搜索反馈内容…" @keyup.enter="reload" />
+        <label class="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
+          <input type="checkbox" v-model="onlyMine" class="accent-primary-600" @change="reload" />
+          只看我的认领
+        </label>
         <button @click="reload" class="btn-primary">🔍 查询</button>
       </div>
     </div>
@@ -74,7 +82,8 @@
       </template>
     </div>
     <div v-else class="space-y-3">
-      <FeedbackCard v-for="it in items" :key="it.id" :item="it" @open="goDetail" />
+      <FeedbackCard v-for="it in items" :key="it.id" :item="it"
+        @open="goDetail" @claim="doClaim" @claim-draft="doClaimDraft" @material="toggleMaterial" />
     </div>
 
     <!-- 分页 -->
@@ -90,7 +99,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../lib/api'
-import { PLATFORMS, CONTENT_TYPES, PART_TYPES, SCENES, PRIORITIES, STATUSES } from '../lib/config'
+import { PLATFORMS, CONTENT_TYPES, PART_TYPES, SCENES, PRIORITIES, STATUSES, MARKETS } from '../lib/config'
 import FeedbackCard from '../components/FeedbackCard.vue'
 
 const router = useRouter()
@@ -101,6 +110,7 @@ const pageSize = 20
 const loading = ref(false)
 const stats = ref({})
 const emptyCtx = ref(null)
+const onlyMine = ref(false)
 
 function formatTime(iso) {
   if (!iso) return ''
@@ -109,7 +119,7 @@ function formatTime(iso) {
 }
 
 const filters = reactive({
-  platform: '', part_type: '', ai_scene: '', content_type: '', ai_priority: '', status: '', q: ''
+  platform: '', part_type: '', ai_scene: '', content_type: '', ai_priority: '', status: '', market: '', q: ''
 })
 
 const statCards = computed(() => [
@@ -123,7 +133,9 @@ const statCards = computed(() => [
 async function load() {
   loading.value = true
   try {
-    const res = await api.items.list({ ...filters, page: page.value, page_size: pageSize })
+    const params = { ...filters, page: page.value, page_size: pageSize }
+    if (onlyMine.value) params.claim_user_id = 'me'
+    const res = await api.items.list(params)
     items.value = res.items || []
     total.value = res.total || 0
     stats.value = res.stats || {}
@@ -135,5 +147,33 @@ async function load() {
 
 function reload() { page.value = 1; load() }
 function goDetail(id) { router.push(`/item/${id}`) }
+
+// 卡片操作（修复原死按钮：claim 事件此前无监听）
+async function doClaim(id) {
+  try {
+    await api.items.claim(id)
+    await load()
+  } catch (e) {
+    alert(e.message || '认领失败')
+    load()
+  }
+}
+async function doClaimDraft(id) {
+  try {
+    await api.items.claim(id)
+    router.push(`/item/${id}?draft=official`)
+  } catch (e) {
+    alert(e.message || '认领失败')
+    load()
+  }
+}
+async function toggleMaterial(id) {
+  try {
+    await api.items.toggleMaterial(id)
+    await load()
+  } catch (e) {
+    alert(e.message || '操作失败')
+  }
+}
 onMounted(load)
 </script>

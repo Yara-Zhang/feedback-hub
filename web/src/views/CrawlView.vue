@@ -1,10 +1,18 @@
 <template>
   <div>
-    <div class="flex items-center justify-between mb-5">
+    <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
       <h2 class="text-lg font-bold text-slate-800">抓取状态</h2>
-      <button class="btn-primary" :disabled="triggering" @click="triggerNow">
-        ⚡ 立即抓取一轮
-      </button>
+      <div class="flex flex-wrap gap-2">
+        <button class="btn-primary" :disabled="triggering" @click="triggerNow">
+          ⚡ 立即抓取一轮
+        </button>
+        <button class="btn-ghost" :disabled="rechecking" @click="recheckReplied">
+          🔄 复查已回复互动
+        </button>
+        <button class="btn-ghost" :disabled="sendingDaily" @click="sendDailyReport">
+          📊 发送昨日日报到飞书群
+        </button>
+      </div>
     </div>
 
     <div v-if="loading" class="text-center py-16 text-slate-400">加载中…</div>
@@ -76,12 +84,14 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '../lib/api'
 import { PLATFORMS } from '../lib/config'
 
-const JOB_TYPES = { search: '关键词搜索', fetch_comments: '评论抓取', enrich_llm: 'AI 精筛' }
+const JOB_TYPES = { search: '关键词搜索', fetch_comments: '评论抓取', enrich_llm: 'AI 精筛', recheck: '回复效果复查' }
 const JOB_STATUS = { pending: '排队中', running: '执行中', done: '完成', failed: '失败' }
 
 const status = ref({})
 const loading = ref(true)
 const triggering = ref(false)
+const rechecking = ref(false)
+const sendingDaily = ref(false)
 const budgetInput = ref(1500)
 
 const usageOverBudget = computed(() => (status.value.today_usage ?? 0) >= (status.value.daily_budget ?? 1500))
@@ -103,6 +113,25 @@ async function triggerNow() {
     alert('已触发新一轮抓取，任务将在几分钟内逐步执行')
     setTimeout(load, 3000)
   } catch (e) { alert(e.message) } finally { triggering.value = false }
+}
+
+// 复查已回复条目的最新互动数（回复效果追踪）
+async function recheckReplied() {
+  rechecking.value = true
+  try {
+    const res = await api.items.recheck()
+    alert(`已入队 ${res.queued} 条复查任务，几分钟后在对应条目详情页看到「回复后互动」`)
+  } catch (e) { alert(e.message) } finally { rechecking.value = false }
+}
+
+// 发送昨日日报（按需日报，宣发冲刺期天天点）
+async function sendDailyReport() {
+  if (!confirm('把昨日反馈数据生成日报发送到飞书群？')) return
+  sendingDaily.value = true
+  try {
+    const res = await api.report.sendDaily()
+    alert(`日报已发送（昨日新增 ${res.stats?.week_total ?? 0} 条有效反馈）`)
+  } catch (e) { alert(e.message) } finally { sendingDaily.value = false }
 }
 
 async function saveBudget() {

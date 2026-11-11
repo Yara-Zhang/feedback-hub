@@ -1,8 +1,8 @@
 // 关键词管理 API（仅管理员）
-// GET /list | POST / | PATCH /:id | DELETE /:id
+// GET /list | GET /stats | POST / | PATCH /:id | DELETE /:id
 import { preflight, json, err, fnPath, body } from '../_shared/cors.ts'
 import { requireAdmin } from '../_shared/auth.ts'
-import { restSelect, restInsert, restPatch, restDelete } from '../_shared/rest.ts'
+import { restSelect, restInsert, restPatch, restDelete, restRpc } from '../_shared/rest.ts'
 
 Deno.serve(async (req) => {
   const pre = preflight(req)
@@ -14,35 +14,44 @@ Deno.serve(async (req) => {
 
     if (path === '/list' && req.method === 'GET') {
       const { data } = await restSelect('keywords', { select: '*', order: 'part_type.asc,id.asc' })
-      return json({ keywords: data })
+      // 附带质量统计（命中数/P0数/相关率），前端关键词质量视图用
+      let statsMap: Record<string, { hits: number; p0_count: number; relevant_rate: number }> = {}
+      try {
+        const stats = await restRpc<Array<{ keyword: string; hits: number; p0_count: number; relevant_rate: number }>>('keyword_stats')
+        statsMap = Object.fromEntries((stats || []).map((s) => [s.keyword, s]))
+      } catch { /* 统计失败不阻断列表 */ }
+      return json({ keywords: (data || []).map((k) => ({ ...k, stats: statsMap[k.keyword] || null })) })
     }
 
     if ((path === '' || path === '/') && req.method === 'POST') {
-      const b = await body<{ keyword: string; part_type: string; group_tag?: string }>(req)
+      const b = await body<{ keyword: string; part_type: string; group_tag?: string; market?: string }>(req)
       if (!b.keyword?.trim()) return err('关键词不能为空')
       if (!['part_a', 'part_b', 'exclude'].includes(b.part_type)) return err('非法 part_type')
+      const market = ['cn', 'en', 'jp', 'kr'].includes(b.market || '') ? b.market! : 'cn'
       try {
         await restInsert('keywords', [{
           keyword: b.keyword.trim().slice(0, 60),
           part_type: b.part_type,
           group_tag: b.group_tag || 'none',
+          market,
           enabled: true,
         }])
         return json({ ok: true })
       } catch (e) {
-        if (String(e).includes('duplicate')) return err('关键词已存在')
+        if (String(e).includes('duplicate')) return err('关键词已存在（同市场同类型）')
         throw e
       }
     }
 
     const idMatch = path.match(/^\/(\d+)$/)
     if (idMatch && req.method === 'PATCH') {
-      const b = await body<{ keyword?: string; enabled?: boolean; group_tag?: string; note?: string }>(req)
+      const b = await body<{ keyword?: string; enabled?: boolean; group_tag?: string; note?: string; market?: string }>(req)
       const patch: Record<string, unknown> = {}
       if (typeof b.keyword === 'string' && b.keyword.trim()) patch.keyword = b.keyword.trim().slice(0, 60)
       if (typeof b.enabled === 'boolean') patch.enabled = b.enabled
       if (typeof b.group_tag === 'string') patch.group_tag = b.group_tag
       if (typeof b.note === 'string') patch.note = b.note.slice(0, 200)
+      if (['cn', 'en', 'jp', 'kr'].includes(b.market || '')) patch.market = b.market
       if (!Object.keys(patch).length) return err('无更新字段')
       await restPatch('keywords', { id: `eq.${idMatch[1]}` }, patch)
       return json({ ok: true })

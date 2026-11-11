@@ -11,6 +11,7 @@
         <!-- 标签行 -->
         <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
           <span class="tag" :class="PLATFORMS[item.platform]?.color">{{ PLATFORMS[item.platform]?.label }}</span>
+          <span v-if="item.market && item.market !== 'cn'" class="tag" :class="MARKETS[item.market]?.cls">{{ MARKETS[item.market]?.label }}</span>
           <span class="tag bg-slate-100 text-slate-600">{{ CONTENT_TYPES[item.content_type] || item.content_type }}</span>
           <span class="tag bg-indigo-50 text-indigo-600" v-if="item.part_type === 'part_a'">沉浸式翻译</span>
           <span class="tag bg-emerald-50 text-emerald-600" v-if="item.ai_scene && SCENES[item.ai_scene]">{{ SCENES[item.ai_scene] }}</span>
@@ -18,7 +19,13 @@
           <span v-if="item.ai_sentiment === 'negative'" class="tag bg-orange-100 text-orange-600">负面</span>
           <span v-if="item.ai_sentiment === 'positive'" class="tag bg-green-100 text-green-600">正面</span>
           <span class="tag" :class="statusCls(item.status)">{{ STATUSES[item.status] }}</span>
+          <span v-if="item.ai_topic" class="tag bg-fuchsia-50 text-fuchsia-600">#{{ item.ai_topic }}</span>
+          <span v-if="item.ai_confidence != null && item.ai_confidence < 0.7" class="tag bg-rose-50 text-rose-500">低置信</span>
+          <span v-if="item.ai_verified === false" class="tag bg-amber-50 text-amber-600">引句未核验</span>
         </div>
+
+        <!-- 用户卡点原话 -->
+        <p v-if="item.ai_quote" class="text-xs text-slate-500 italic border-l-2 border-slate-300 pl-2 mb-1.5">"{{ item.ai_quote }}"</p>
 
         <!-- 内容摘要 -->
         <p class="text-sm text-slate-700 line-clamp-2 mb-2">{{ item.content_text }}</p>
@@ -31,6 +38,7 @@
           <span v-if="item.metrics_json?.like_count != null">❤️ {{ item.metrics_json.like_count }}</span>
           <span v-if="item.metrics_json?.comment_count != null">💬 {{ item.metrics_json.comment_count }}</span>
           <span v-if="item.claim_name">已认领：{{ item.claim_name }}</span>
+          <span v-if="item.reply_url" class="text-emerald-500">已回复 ↗</span>
         </div>
 
         <!-- 用途标签 -->
@@ -40,26 +48,37 @@
       </div>
 
       <!-- 右侧操作 -->
-      <div class="shrink-0 flex flex-col gap-2" @click.stop>
-        <a :href="item.source_url" target="_blank" rel="noopener" class="btn-ghost !px-3 !py-1.5 text-xs">查看原文 ↗</a>
+      <div class="shrink-0 flex flex-col gap-2 items-stretch" @click.stop>
+        <a :href="item.source_url" target="_blank" rel="noopener" class="btn-ghost !px-3 !py-1.5 text-xs text-center">查看原文 ↗</a>
         <button v-if="item.status === 'new'" class="btn-primary !px-3 !py-1.5 text-xs" @click="$emit('claim', item.id)">认领</button>
+        <button v-if="item.status === 'new'" class="btn-primary !px-3 !py-1.5 text-xs !bg-slate-700" @click="$emit('claim-draft', item.id)">认领并起草</button>
+        <button class="btn-ghost !px-3 !py-1.5 text-xs text-center"
+                :class="item.is_material ? '!text-amber-500' : ''"
+                @click="$emit('material', item.id)">
+          {{ item.is_material ? '★ 已收藏' : '☆ 收藏素材' }}
+        </button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { PLATFORMS, CONTENT_TYPES, SCENES, PRIORITIES, STATUSES, USE_TAGS } from '../lib/config'
+import { PLATFORMS, CONTENT_TYPES, SCENES, PRIORITIES, STATUSES, USE_TAGS, MARKETS } from '../lib/config'
 
 defineProps({ item: { type: Object, required: true } })
-defineEmits(['open', 'claim'])
+defineEmits(['open', 'claim', 'claim-draft', 'material'])
 
 function fmtTime(t) {
   if (!t) return ''
   return String(t).slice(0, 10)
 }
 function statusCls(s) {
-  return { new: 'bg-yellow-50 text-yellow-600', claimed: 'bg-primary-50 text-primary-700', processed: 'bg-green-50 text-green-600', ignored: 'bg-slate-100 text-slate-400' }[s] || 'bg-slate-100'
+  return {
+    new: 'bg-yellow-50 text-yellow-600',
+    claimed: 'bg-primary-50 text-primary-700',
+    replied: 'bg-green-50 text-green-600',
+    skipped: 'bg-slate-100 text-slate-400'
+  }[s] || 'bg-slate-100'
 }
 function useTagLabel(t) { return USE_TAGS[t] || t }
 </script>

@@ -9,7 +9,7 @@ import { chat } from '../_shared/llm.ts'
 import type { SessionPayload } from '../_shared/jwt.ts'
 
 const PLATFORM_NAMES: Record<string, string> = {
-  xhs: '小红书', wb: '微博', bili: 'B站', dy: '抖音', x: 'X(推特)',
+  xhs: '小红书', wb: '微博', bili: 'B站', dy: '抖音', x: 'X(推特)', reddit: 'Reddit', zhihu: '知乎',
 }
 
 const TYPE_NAMES: Record<string, string> = { video: '视频', note: '笔记', post: '帖子', comment: '评论' }
@@ -71,6 +71,12 @@ Deno.serve(async (req) => {
       const item = await loadItem(genMatch[1])
       if (!item) return err('反馈不存在', 404)
 
+      // 日/韩市场处于监测期（阶段0）：只采集打标，不生成回复草稿
+      const market = String(item.market || 'cn')
+      if (market === 'jp' || market === 'kr') {
+        return err('日/韩市场处于监测期，暂不生成回复草稿（积累相关率后再开放）', 400)
+      }
+
       const b = await body<{ draft_type: string }>(req)
       if (!['official', 'passersby'].includes(b.draft_type)) return err('非法 draft_type')
 
@@ -78,6 +84,8 @@ Deno.serve(async (req) => {
       const scene = String(item.ai_scene || '')
       const isComment = item.content_type === 'comment'
       const parentCtx = isComment ? `（该条为评论，所评论的原文：${(item.extra_json as Record<string, unknown>)?.parent_summary || '无'}）` : ''
+      // 用户卡点原话（AI 打标摘出并核验过的），提高回复针对性
+      const quoteCtx = item.ai_quote ? `\n（用户卡点原话：${String(item.ai_quote).slice(0, 80)}）` : ''
 
       let prompt: string
       if (b.draft_type === 'official') {
@@ -88,7 +96,7 @@ Deno.serve(async (req) => {
 4. 如果反馈是负面吐槽，先道歉承认问题，给出建议方案或说明改进中，不狡辩。
 
 用户反馈内容：
-${String(item.content_text).slice(0, 800)}${parentCtx}
+${String(item.content_text).slice(0, 800)}${parentCtx}${quoteCtx}
 
 直接输出回复正文，不要任何解释或引号。`
       } else {
@@ -99,7 +107,7 @@ ${String(item.content_text).slice(0, 800)}${parentCtx}
 4. 负面反馈就顺着聊体验，不强行洗白。
 
 帖子/评论内容：
-${String(item.content_text).slice(0, 800)}${parentCtx}
+${String(item.content_text).slice(0, 800)}${parentCtx}${quoteCtx}
 
 直接输出回复正文，不要任何解释或引号。`
       }

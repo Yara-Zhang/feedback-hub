@@ -2,7 +2,7 @@
 // 端点与字段路径均已对照 TikHub OpenAPI (api.tikhub.io/openapi.json) 及真实响应核对于 2026-10-29
 import { dig, firstArray, normTime, stripHtml, tikhubGet, tikhubPost } from './client.ts'
 
-export type Platform = 'xhs' | 'wb' | 'bili' | 'dy' | 'x'
+export type Platform = 'xhs' | 'wb' | 'bili' | 'dy' | 'x' | 'reddit' | 'zhihu'
 
 export interface NormalItem {
   source_id: string
@@ -235,7 +235,7 @@ const bili: PlatformAdapter = {
           like: num(v.like ?? dig(v, 'stat', 'like')),
           comment_count: num(v.video_review ?? v.review ?? dig(v, 'stat', 'reply')),
         },
-        extra: { title },
+        extra: { title, aid: num(v.aid) || undefined },
         comment_count: num(v.video_review ?? v.review ?? dig(v, 'stat', 'reply')),
       } as NormalItem
     }).filter(Boolean) as NormalItem[]
@@ -326,4 +326,166 @@ const twitter: PlatformAdapter = {
   },
 }
 
-export const adapters: Record<Platform, PlatformAdapter> = { dy: douyin, xhs, wb: weibo, bili, x: twitter }
+// ============ Reddit（英文市场） ============
+// 搜索：GET /reddit/app/fetch_dynamic_search（sort=NEW 大写枚举，time_range=month，need_format=true 精简结构）
+// 结构：data.children[].post{ id, postTitle, content.markdown, authorInfo.name, createdAt, commentCount, score, permalink, languageCode }
+// 详情：GET /reddit/app/fetch_post_details?post_id=t3_xxx（recheck 用）
+const reddit: PlatformAdapter = {
+  async search(keyword, page) {
+    if (page > 1) return [] // 游标翻页字段与适配器接口不匹配，v1 只抓第一页
+    const res = await tikhubGet('/api/v1/reddit/app/fetch_dynamic_search', {
+      query: keyword, search_type: 'post', sort: 'NEW', time_range: 'month', need_format: true,
+    })
+    const list = firstArray(res, ['data', 'children'], ['data', 'data', 'children'])
+    return list.map((raw) => {
+      const p = (dig(raw, 'post') ?? raw) as Record<string, unknown>
+      const id = String(p.id ?? '')
+      if (!id || !id.startsWith('t3_')) return null
+      const title = stripHtml(String(p.postTitle ?? ''))
+      const body = stripHtml(String(dig(p, 'content', 'markdown') ?? p.content ?? ''))
+      const permalink = String(p.permalink ?? '')
+      return {
+        source_id: id,
+        source_url: permalink.startsWith('/') ? `https://www.reddit.com${permalink}` : (permalink || `https://www.reddit.com/comments/${id.replace('t3_', '')}`),
+        content_type: 'post',
+        author_name: String(dig(p, 'authorInfo', 'name') ?? p.author ?? ''),
+        author_id: String(dig(p, 'authorInfo', 'id') ?? ''),
+        text: [title, body].filter(Boolean).join('\n'),
+        publish_time: normTime(p.createdAt),
+        metrics: {
+          like_count: num(p.score),
+          comment_count: num(p.commentCount),
+        },
+        extra: { title, lang: p.languageCode ?? undefined, subreddit: dig(p, 'subreddit', 'name') ?? undefined },
+        comment_count: num(p.commentCount),
+      } as NormalItem
+    }).filter(Boolean) as NormalItem[]
+  },
+  async fetchComments(_sourceId, _page) {
+    return [] // v1 不抓 Reddit 评论
+  },
+}
+
+// ============ 知乎（中文市场补充） ============
+// 搜索：GET /zhihu/web/fetch_article_search_v3（keyword/limit/offset）
+// 结构：data.data[]，type='search_result' 的 object{ id, title, type, url, excerpt, content, voteup_count, comment_count, created_time, author }
+const zhihu: PlatformAdapter = {
+  async search(keyword, page) {
+    const res = await tikhubGet('/api/v1/zhihu/web/fetch_article_search_v3', {
+      keyword, limit: 20, offset: (page - 1) * 20,
+    })
+    const list = firstArray(res, ['data', 'data'], ['data'])
+    return list.map((raw) => {
+      const it = raw as Record<string, unknown>
+      const obj = (it.object ?? {}) as Record<string, unknown>
+      if (it.type !== 'search_result' || !obj.id) return null
+      const id = String(obj.id)
+      const title = stripHtml(String(obj.title ?? ''))
+      const excerpt = stripHtml(String(obj.excerpt ?? ''))
+      const content = stripHtml(String(obj.content ?? ''))
+      // url 形如 https://api.zhihu.com/articles/{id}，转正式链接
+      const url = `https://zhuanlan.zhihu.com/p/${id}`
+      return {
+        source_id: id,
+        source_url: url,
+        content_type: 'post',
+        author_name: String(dig(obj, 'author', 'name') ?? dig(obj, 'author', 'url_token') ?? ''),
+        author_id: String(dig(obj, 'author', 'id') ?? ''),
+        text: [title, excerpt || content].filter(Boolean).join('\n'),
+        publish_time: normTime(obj.created_time),
+        metrics: {
+          like_count: num(obj.voteup_count),
+          comment_count: num(obj.comment_count),
+        },
+        extra: { title, zhihu_type: obj.type },
+        comment_count: num(obj.comment_count),
+      } as NormalItem
+    }).filter(Boolean) as NormalItem[]
+  },
+  async fetchComments(_sourceId, _page) {
+    return [] // v1 不抓知乎评论
+  },
+}
+
+// ============ 帖子详情（回复效果追踪 recheck 用） ============
+// 按平台调详情端点取最新互动数据；返回归一化 metrics 或 null（该平台不支持/失败）
+// extra 传条目的 extra_json（B 站需 extra.aid，知乎需要文章类型）
+export async function fetchDetail(
+  platform: Platform,
+  sourceId: string,
+  sourceUrl: string,
+  extra: Record<string, unknown> = {},
+): Promise<Record<string, number> | null> {
+  try {
+    if (platform === 'x') {
+      const res = await tikhubGet('/api/v1/twitter/web/fetch_tweet_detail', { tweet_id: sourceId })
+      const t = (dig(res, 'data', 'data', 'tweet') ?? dig(res, 'data', 'tweet') ?? dig(res, 'data', 'data') ?? dig(res, 'data')) as Record<string, unknown> | null
+      if (!t) return null
+      return {
+        like_count: num(t.favorites ?? t.favorite_count ?? dig(t, 'user_info', 'favorites')),
+        comment_count: num(t.replies ?? t.reply_count),
+        repost_count: num(t.retweets ?? t.retweet_count),
+      }
+    }
+    if (platform === 'xhs') {
+      const m = sourceUrl.match(/xsec_token=([^&]+)/)
+      if (!m) return null
+      const res = await tikhubGet('/api/v1/xiaohongshu/web_v3/fetch_note_detail', {
+        note_id: sourceId, xsec_token: decodeURIComponent(m[1]),
+      })
+      const n = (dig(res, 'data', 'data') ?? dig(res, 'data')) as Record<string, unknown> | null
+      if (!n) return null
+      return {
+        like_count: num(n.liked_count ?? dig(n, 'interact_info', 'liked_count')),
+        comment_count: num(n.comments_count ?? dig(n, 'interact_info', 'comment_count')),
+        collected_count: num(n.collected_count),
+      }
+    }
+    if (platform === 'wb') {
+      const res = await tikhubGet('/api/v1/weibo/web_v2/fetch_post_detail', { id: sourceId, is_get_long_text: '0' })
+      const s = (dig(res, 'data', 'data') ?? dig(res, 'data')) as Record<string, unknown> | null
+      if (!s) return null
+      return {
+        like_count: num(dig(s, 'interaction', 'like_count') ?? s.attitudes_count),
+        comment_count: num(dig(s, 'interaction', 'comment_count') ?? s.comments_count),
+        repost_count: num(dig(s, 'interaction', 'repost_count') ?? s.reposts_count),
+      }
+    }
+    if (platform === 'bili') {
+      const aid = num(extra.aid)
+      if (!aid) return null // 条目入库时未存 aid，无法查详情
+      const res = await tikhubGet('/api/v1/bilibili/web/fetch_video_detail', { aid })
+      const v = (dig(res, 'data', 'data') ?? dig(res, 'data')) as Record<string, unknown> | null
+      if (!v) return null
+      return {
+        view: num(dig(v, 'stat', 'view') ?? v.play),
+        like_count: num(dig(v, 'stat', 'like') ?? v.like),
+        comment_count: num(dig(v, 'stat', 'reply') ?? v.review),
+      }
+    }
+    if (platform === 'reddit') {
+      const res = await tikhubGet('/api/v1/reddit/app/fetch_post_details', { post_id: sourceId, need_format: true })
+      const p = (dig(res, 'data', 'post') ?? dig(res, 'data', 'data', 'post') ?? dig(res, 'data')) as Record<string, unknown> | null
+      if (!p) return null
+      return {
+        like_count: num(p.score),
+        comment_count: num(p.commentCount),
+      }
+    }
+    if (platform === 'zhihu') {
+      const res = await tikhubGet('/api/v1/zhihu/web/fetch_column_article_detail', { article_id: sourceId })
+      const a = (dig(res, 'data', 'data') ?? dig(res, 'data')) as Record<string, unknown> | null
+      if (!a) return null
+      return {
+        like_count: num(a.voteup_count ?? a.voteup),
+        comment_count: num(a.comment_count ?? a.comments_count),
+      }
+    }
+    if (platform === 'dy') return null // TikHub douplus 详情端点实测不可用，跳过
+    return null
+  } catch (_e) {
+    return null // 详情失败不阻断 recheck 流程，调用方按 null 记录
+  }
+}
+
+export const adapters: Record<Platform, PlatformAdapter> = { dy: douyin, xhs, wb: weibo, bili, x: twitter, reddit, zhihu }

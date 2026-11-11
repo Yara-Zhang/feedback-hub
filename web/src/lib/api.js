@@ -46,7 +46,10 @@ export const api = {
     list: (filters) => call('api-items', '/list', { params: filters }),
     detail: (id) => call('api-items', `/${id}`),
     claim: (id) => call('api-items', `/${id}/claim`, { method: 'POST' }),
-    setStatus: (id, status) => call('api-items', `/${id}/status`, { method: 'POST', body: { status } }),
+    setStatus: (id, status, extra = {}) => call('api-items', `/${id}/status`, { method: 'POST', body: { status, ...extra } }),
+    toggleMaterial: (id) => call('api-items', `/${id}/material`, { method: 'POST' }),
+    recheck: () => call('api-items', '/recheck', { method: 'POST' }),
+    hot: (params) => call('api-items', '/hot', { params }),
     drafts: (id) => call('api-reply', `/${id}/drafts`),
     generateDraft: (id, draft_type, tone) => call('api-reply', `/${id}/generate`, { method: 'POST', body: { draft_type, tone } }),
     saveDraft: (id, draft_type, content) => call('api-reply', `/${id}/drafts`, { method: 'POST', body: { draft_type, content } })
@@ -67,7 +70,9 @@ export const api = {
     setRole: (id, role) => call('api-items', '/users/role', { method: 'POST', body: { id, role } })
   },
   report: {
-    preview: () => call('weekly-report', '/preview')
+    preview: (period) => call('weekly-report', '/preview', { params: period ? { period } : {} }),
+    sendDaily: () => call('weekly-report', '', { method: 'POST', body: { period: 'daily' } }),
+    sendWeekly: () => call('weekly-report', '', { method: 'POST', body: {} })
   },
   me: () => call('api-items', '/me'),
   exportUrl: (scope) => {
