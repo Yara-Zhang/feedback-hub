@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// 存量补标：为 ai_status=done 且无 painpoint 的条目批量生成「一句人话痛点标题」
-// 写回路径：pg_net → PostgREST upsert（绕开管理 API 限流；管理 API 仅用于拉清单/核对/发起 pg_net）
-// 用法: node scripts/backfill-painpoint.mjs
+// 同步 CASE 批量 UPDATE（每批一条 SQL，管理 API 同步执行；feedback_items 的
+// dedup_hash NOT NULL 导致 PostgREST upsert 不可用；管理 API 有 429 限流，q() 内置退避）
+// 用法: node scripts/backfill-painpoint.mjs（幂等，只补 painpoint 为空的 done 条目）
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -36,24 +36,12 @@ async function q(sql) {
 
 const sqlStr = (s) => `'${String(s).replace(/'/g, "''")}'`
 
-// 经 pg_net → PostgREST upsert 写回（merge-duplicates 只更新提供的列）
-async function upsertBatch(pairs) {
-  const body = JSON.stringify(pairs.map((p) => ({ id: p.id, painpoint: p.pp })))
-  const headers = JSON.stringify({
-    'Content-Type': 'application/json', apikey: SKEY, Authorization: `Bearer ${SKEY}`,
-    Prefer: 'resolution=merge-duplicates,return=minimal',
-  })
-  const r = await q(`select net.http_post(url := ${sqlStr(REST + '?on_conflict=id')}, headers := ${sqlStr(headers)}::jsonb, body := ${sqlStr(body)}::jsonb, timeout_milliseconds := 30000) as id;`)
-  const id = r[0].id
-  for (let i = 0; i < 15; i++) {
-    await new Promise((x) => setTimeout(x, 2000))
-    const c = await q(`select status_code, error_msg from net._http_response where id=${id}`)
-    if (Array.isArray(c) && c.length) {
-      if (c[0].status_code >= 400) throw new Error(`upsert ${c[0].status_code}: ${String(c[0].error_msg || '').slice(0, 150)}`)
-      return true
-    }
-  }
-  throw new Error('upsert 响应超时')
+// 同步 CASE 批量 UPDATE（每批一条 SQL，管理 API 同步执行；feedback_items 的
+// dedup_hash NOT NULL 导致 PostgREST upsert 不可用）
+async function updateBatch(pairs) {
+  const cases = pairs.map((p) => `when ${p.id} then ${sqlStr(p.pp)}`).join(' ')
+  const ids = pairs.map((p) => p.id).join(',')
+  await q(`update feedback_items set painpoint = case id ${cases} else painpoint end where id in (${ids});`)
 }
 
 const sys = `你是「沉浸式翻译」产品的需求洞察编辑。给你若干条已判定的用户社媒反馈（来自中/日/韩/英语市场），为每条写一句中文大白话痛点标题，直接写明这个用户遇到的问题，≤24 字。
@@ -102,7 +90,7 @@ async function worker() {
       const pairs = results
         .map((r) => ({ id: Number(r.id), pp: String(r.painpoint || '').trim().slice(0, 40) }))
         .filter((p) => p.id && p.pp)
-      if (pairs.length) await upsertBatch(pairs)
+      if (pairs.length) await updateBatch(pairs)
       done += pairs.length
     } catch (e) {
       failed += batch.length
