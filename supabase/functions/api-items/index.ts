@@ -40,11 +40,14 @@ Deno.serve(async (req) => {
       const map: [string, string][] = [
         ['platform', 'platform'], ['part_type', 'part_type'], ['ai_scene', 'ai_scene'],
         ['content_type', 'content_type'], ['ai_priority', 'ai_priority'], ['market', 'market'],
+        ['ai_sentiment', 'ai_sentiment'], ['ai_topic', 'ai_topic'],
       ]
       for (const [param, col] of map) {
         const v = p.get(param)
         if (v) filters[col] = `eq.${v}`
       }
+      const tags = p.get('tags')
+      if (tags) filters['ai_tags_json'] = `cs.["${tags}"]`
       const status = p.get('status')
       if (status) filters['status'] = `in.(${status.split(',').join(',')})`
       if (p.get('claim_user_id') === 'me') filters['claim_user_id'] = `eq.${session.sub}`

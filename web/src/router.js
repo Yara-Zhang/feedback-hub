@@ -4,6 +4,7 @@ import { getToken } from './lib/api'
 const routes = [
   { path: '/login', name: 'login', component: () => import('./views/LoginView.vue'), meta: { public: true } },
   { path: '/', name: 'dashboard', component: () => import('./views/DashboardView.vue') },
+  { path: '/insights', name: 'insights', component: () => import('./views/InsightsView.vue'), meta: { fullscreen: true } },
   { path: '/item/:id', name: 'item', component: () => import('./views/ItemDetailView.vue') },
   { path: '/hot', name: 'hot', component: () => import('./views/HotView.vue') },
   { path: '/material', name: 'material', component: () => import('./views/MaterialView.vue') },

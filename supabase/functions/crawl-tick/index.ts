@@ -218,7 +218,7 @@ async function processComments(job: JobRow, budget: number, used: number): Promi
 interface LlmResult {
   id: number; relevant: boolean; scene: string; sentiment: string
   priority: string; tags: string[]; reason: string
-  quote?: string | null; confidence?: number; topic?: string | null
+  quote?: string | null; confidence?: number; topic?: string | null; painpoint?: string | null
 }
 
 // 互动总数（用于告警阈值判断）
@@ -257,6 +257,7 @@ async function processEnrich(job: JobRow): Promise<void> {
 - quote: relevant=true 时，从原帖逐字摘出一句（≤60 字）能直接看出「发帖人本人卡在外语/翻译上」的原话（如"看不懂英文""no english subtitles""한글 자막 없어서 못 봐"）；找不到这样的原话则置 null。relevant=false 置 null。
 - confidence: 本次判定的置信度，0 到 1 的小数
 - topic: relevant=true 时给出 2-8 个字的话题概括（如"漫画没汉化""AO3读不懂""没中文字幕"），同一话题的帖子用相同表述；relevant=false 置 null
+- painpoint: relevant=true 时，用一句中文大白话直接写出这个用户遇到的问题/痛点，≤24 字，让非技术同事扫一眼就懂（如"看不懂日文漫画，追更三年等不到汉化""AO3 英文小说读得吃力""飞机上看视频没有双语字幕"）；语气直白、贴用户口吻，禁止技术判定腔（不要写"属产品负面口碑"这类分析语）。relevant=false 置 null。
 - reason: 一句话中文说明判定理由
 
 仅输出 JSON：{"results": [{...每条一个对象，包含全部字段}]}`
@@ -304,6 +305,7 @@ async function processEnrich(job: JobRow): Promise<void> {
         ai_confidence: r.relevant ? confidence : null,
         ai_verified: r.relevant ? verified : null,
         ai_topic: r.relevant ? (r.topic || '').slice(0, 40) || null : null,
+        painpoint: r.relevant ? (r.painpoint || '').slice(0, 40) || null : null,
         alarm_flag: needAlarm,
       })
     }

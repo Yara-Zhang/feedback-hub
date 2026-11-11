@@ -22,7 +22,7 @@
       </div>
     </header>
 
-    <main class="flex-1 max-w-6xl w-full mx-auto px-4 py-6">
+    <main class="flex-1 w-full" :class="route.meta.fullscreen ? '' : 'max-w-6xl mx-auto px-4 py-6'">
       <router-view />
     </main>
 
@@ -43,6 +43,7 @@ const user = getCachedUser()
 
 const navs = computed(() => {
   const list = [
+    { to: '/insights', label: '📡 痛点雷达' },
     { to: '/', label: '反馈工作台' },
     { to: '/hot', label: '热点' },
     { to: '/material', label: '素材库' },
@@ -58,7 +59,7 @@ const navs = computed(() => {
   return list
 })
 
-const showNav = computed(() => route.name !== 'login')
+const showNav = computed(() => route.name !== 'login' && !route.meta.fullscreen)
 
 function isActive(to) { return route.path === to }
 function logout() {
