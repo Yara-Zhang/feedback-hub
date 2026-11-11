@@ -72,7 +72,8 @@ export const api = {
   report: {
     preview: (period) => call('weekly-report', '/preview', { params: period ? { period } : {} }),
     sendDaily: () => call('weekly-report', '', { method: 'POST', body: { period: 'daily' } }),
-    sendWeekly: () => call('weekly-report', '', { method: 'POST', body: {} })
+    sendWeekly: () => call('weekly-report', '', { method: 'POST', body: {} }),
+    sendP0Digest: () => call('weekly-report', '/alarm-digest', { method: 'POST', body: {} })
   },
   me: () => call('api-items', '/me'),
   exportUrl: (scope) => {

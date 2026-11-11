@@ -1,6 +1,7 @@
 // 飞书周报：每周一 09:30 北京时间（UTC cron 30 1 * * 1）由 Supabase 定时任务调用
-// POST /          —— 生成并发送（service key 或管理员，body 可选 {period: 'daily'} 发昨日日报）
-// GET  /preview   —— 预览（管理员，不发送，query ?period=daily 预览日报）
+// POST /              —— 生成并发送（service key 或管理员，body 可选 {period: 'daily'} 发昨日日报）
+// GET  /preview       —— 预览（管理员，不发送，query ?period=daily 预览日报）
+// POST /alarm-digest  —— 每日 P0 负面告警汇总（定时 UTC 02:00 或手动触发；发完清 alarm_flag 防重复）
 import { preflight, json, err, fnPath, body } from '../_shared/cors.ts'
 import { requireAdminOrService } from '../_shared/auth.ts'
 import { restSelect, restInsert, restPatch } from '../_shared/rest.ts'
@@ -148,6 +149,41 @@ Deno.serve(async (req) => {
   const { path, url } = fnPath(req, 'weekly-report')
 
   try {
+    // ---------- 每日 P0 负面告警汇总 ----------
+    if (path === '/alarm-digest' && req.method === 'POST') {
+      await requireAdminOrService(req)
+      const { data: rows } = await restSelect<{
+        id: number; platform: string; content_text: string; source_url: string
+        metrics_json: Record<string, number> | null; ai_quote: string | null
+      }>('feedback_items', {
+        select: 'id,platform,content_text,source_url,metrics_json,ai_quote',
+        alarm_flag: 'eq.true', ai_priority: 'eq.p0', ai_sentiment: 'eq.negative', ai_status: 'neq.skipped',
+        order: 'id.desc', limit: 20,
+      })
+      const alarms = rows || []
+      if (!alarms.length) return json({ ok: true, sent: 0, note: '无待告警的 P0 负面反馈' })
+
+      const eng = (m: Record<string, number> | null) => !m ? 0
+        : ['like_count', 'liked_count', 'digg_count', 'comment_count', 'repost_count', 'share_count'].reduce((s, k) => s + (Number(m[k]) || 0), 0)
+      const listMd = alarms.map((it, i) =>
+        `${i + 1}. [${PLATFORM_NAMES[it.platform] || it.platform}] 互动 ${eng(it.metrics_json)}：${String(it.content_text).slice(0, 60).replace(/[\n\r]/g, ' ')}… [查看原帖](${it.source_url})`
+      ).join('\n')
+
+      await sendWebhookCard({
+        config: { wide_screen_mode: true },
+        header: { title: { tag: 'plain_text', content: `🚨 P0 负面反馈汇总（${alarms.length} 条待处理）` }, template: 'red' },
+        elements: [
+          { tag: 'div', text: { tag: 'lark_md', content: `**今日命中 ${alarms.length} 条高互动 P0 负面反馈，请优先处理：**\n${listMd}` } },
+          { tag: 'hr' },
+          { tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: '💻 打开反馈工作台' }, type: 'primary', url: Deno.env.get('FRONTEND_URL') || '' }] },
+          { tag: 'note', elements: [{ tag: 'plain_text', content: '每日 10:00 自动发送 · 内部调研资料，请勿外传' }] },
+        ],
+      })
+      // 发送成功后清零（全部待告警条目，含超出卡片展示的部分），防止重复推送
+      await restPatch('feedback_items', { alarm_flag: 'eq.true' }, { alarm_flag: false })
+      return json({ ok: true, sent: alarms.length })
+    }
+
     if (path === '/preview' && req.method === 'GET') {
       await requireAdminOrService(req)
       const period = url.searchParams.get('period') === 'daily' ? 'daily' : 'weekly'

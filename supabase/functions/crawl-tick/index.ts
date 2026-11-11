@@ -9,7 +9,6 @@ import { adapters, fetchDetail, type NormalItem, type Platform } from '../_share
 import { loadKeywords, prefilter, sha256Hex, detectLang, marketOf } from '../_shared/prefilter.ts'
 import { verifyQuote } from '../_shared/quote-verify.ts'
 import { chatJson } from '../_shared/llm.ts'
-import { sendWebhookCard } from '../_shared/feishu.ts'
 
 interface JobRow {
   id: number
@@ -290,6 +289,10 @@ async function processEnrich(job: JobRow): Promise<void> {
       if (r.relevant && confidence != null && confidence < 0.7) reasonPrefix = '[低置信] '
       if (r.relevant && verified === false) reasonPrefix += '[引句未核验] '
 
+      // P0 负面入每日告警汇总（不逐条实时推群；每日 10:00 alarm-digest 统一发飞书）
+      const eng = item ? totalEngagement(item.metrics_json) : 0
+      const needAlarm = !!(alarmEnabled && r.relevant && priority === 'p0' && sentiment === 'negative' && eng >= alarmThreshold)
+
       await restPatch('feedback_items', { id: `eq.${r.id}` }, {
         ai_priority: priority,
         ai_scene: r.relevant ? scene : 'other',
@@ -301,23 +304,8 @@ async function processEnrich(job: JobRow): Promise<void> {
         ai_confidence: r.relevant ? confidence : null,
         ai_verified: r.relevant ? verified : null,
         ai_topic: r.relevant ? (r.topic || '').slice(0, 40) || null : null,
+        alarm_flag: needAlarm,
       })
-
-      // P0 负面实时告警：互动数超阈值即推飞书群（enrich 每条只跑一次，天然去重）
-      if (alarmEnabled && r.relevant && priority === 'p0' && sentiment === 'negative' && item) {
-        const eng = totalEngagement(item.metrics_json)
-        if (eng >= alarmThreshold) {
-          try {
-            await sendWebhookCard({
-              header: { title: { tag: 'plain_text', content: '🚨 P0 负面反馈告警' } },
-              elements: [
-                { tag: 'div', text: { tag: 'lark_md', content: `**平台：** ${item.platform}　**互动数：** ${eng}\n**摘要：** ${(item.content_text || '').slice(0, 120)}\n**判定：** ${(r.reason || '').slice(0, 100)}` } },
-                { tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: '查看原帖' }, url: item.source_url, type: 'primary' }] },
-              ],
-            })
-          } catch { /* webhook 失败不阻断打标 */ }
-        }
-      }
     }
     await finishJob(job, `精筛${(out.results || []).length}条`)
   } catch (e) {

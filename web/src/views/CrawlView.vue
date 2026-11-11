@@ -12,6 +12,9 @@
         <button class="btn-ghost" :disabled="sendingDaily" @click="sendDailyReport">
           📊 发送昨日日报到飞书群
         </button>
+        <button class="btn-ghost" :disabled="sendingAlarm" @click="sendAlarmDigest">
+          🚨 发送 P0 汇总告警
+        </button>
       </div>
     </div>
 
@@ -92,6 +95,7 @@ const loading = ref(true)
 const triggering = ref(false)
 const rechecking = ref(false)
 const sendingDaily = ref(false)
+const sendingAlarm = ref(false)
 const budgetInput = ref(1500)
 
 const usageOverBudget = computed(() => (status.value.today_usage ?? 0) >= (status.value.daily_budget ?? 1500))
@@ -132,6 +136,16 @@ async function sendDailyReport() {
     const res = await api.report.sendDaily()
     alert(`日报已发送（昨日新增 ${res.stats?.week_total ?? 0} 条有效反馈）`)
   } catch (e) { alert(e.message) } finally { sendingDaily.value = false }
+}
+
+// 手动发送 P0 汇总告警（正常由每日 10:00 定时自动发；这里可随时手动补发）
+async function sendAlarmDigest() {
+  if (!confirm('把当前累积的 P0 负面反馈汇总发送到飞书群？')) return
+  sendingAlarm.value = true
+  try {
+    const res = await api.report.sendP0Digest()
+    alert(res.sent > 0 ? `P0 汇总已发送（${res.sent} 条）` : '当前没有待告警的 P0 负面反馈')
+  } catch (e) { alert(e.message) } finally { sendingAlarm.value = false }
 }
 
 async function saveBudget() {

@@ -198,6 +198,15 @@ select net.http_post(
   timeout_milliseconds := 60000
 );
 $$);`,
+    // 4. 每日 P0 负面告警汇总：北京时间 10:00（02:00 UTC）
+    `select cron.schedule('feedback-p0-digest', '0 2 * * *', $$
+select net.http_post(
+  url := '${fnBase}/weekly-report/alarm-digest',
+  headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select value #>> '{}' from public.app_config where key = 'cron_secret')),
+  body := '{}'::jsonb,
+  timeout_milliseconds := 60000
+);
+$$);`,
   ]
   for (const sql of sqls) {
     await api('/database/query', {
